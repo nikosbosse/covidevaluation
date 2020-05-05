@@ -32,7 +32,8 @@ timeseries <- EpiNow::get_timeseries(dir)
 rt_timeseries <- timeseries$rt %>% 
   dplyr::filter(rt_type %in% "nowcast", 
                 type %in% "nowcast") %>% 
-  # dplyr::filter(region %in% "New York") %>%
+  # only look at New York for now
+  dplyr::filter(region %in% "New York") %>%
   dplyr::mutate(sample = as.numeric(sample)) %>% 
   dplyr::group_by(region, date, sample) %>% 
   dplyr::mutate(rt_sample = 1:dplyr::n()) %>% 
@@ -47,7 +48,8 @@ rt_timeseries <- timeseries$rt %>%
 ## Extract cases timeseries and format
 case_timeseries <- timeseries$incidence %>% 
   dplyr::filter(import_status %in% "local") %>% 
-#  dplyr::filter(region %in% "New York") %>%
+  # only look at New York for now
+  dplyr::filter(region %in% "New York") %>%
   dplyr::mutate(sample = as.numeric(sample)) %>% 
   dplyr::select(timeseries = region, cases, date, sample)
 
@@ -62,9 +64,9 @@ case_timeseries <- case_timeseries %>%
   dplyr::filter(sample %in% samples)
 
 ## Save samples
-saveRDS(rt_timeseries, "forecast/model-choice/data/rt_timeseries.rds")
+saveRDS(rt_timeseries, "data/rt_timeseries.rds")
 
-saveRDS(case_timeseries, "forecast/model-choice/data/case_timeseries.rds")
+saveRDS(case_timeseries, "data/case_timeseries.rds")
 
 # Define a serial interval ------------------------------------------------
 
@@ -110,7 +112,18 @@ no_arima_ensemble <- function(...) {
                                                              cmbn_args = list(weights = "inv_var")), ...)
 }
 
-saveRDS(no_arima_ensemble, here::here("forecast/model-choice/data/ensemble.rds"))
+## CRPS ensemble
+# needs debugging
+# crps_mixture <- function(...){
+#   crps_ensemble(models = list("ARIMA" = function(...){EpiSoon::fable_model(model = fable::ARIMA(y), ...)},
+#                               "ETS" = function(...){EpiSoon::fable_model(model = fable::ETS(y), ...)},
+#                               "NAIVE" = function(...){EpiSoon::fable_model(model = fable::NAIVE(y), ...)},
+#                               "Drift" = function(...){EpiSoon::fable_model(model = fable::RW(y ~ drift()), ...)}
+#                               ),
+#                 weighting_period = 5,
+#                 ...)}
+
+
 
 
 models <- list( 
@@ -118,11 +131,8 @@ models <- list(
   "ARIMA" = function(...){EpiSoon::fable_model(model = fable::ARIMA(y), ...)},
   "ETS" = function(...){EpiSoon::fable_model(model = fable::ETS(y), ...)},
   "Drift" = function(...){EpiSoon::fable_model(model = fable::RW(y ~ drift()), ...)},
-  "Ensemble (mean)" = baseline_mean_ensemble,
   "Ensemble (weighted)" =  baseline_ensemble,
-  "Ensemble (no ARIMA)" = no_arima_ensemble,
-  "Ensemble (previous 14 days)" = current_ensemble,
-  "Ensemble (previous 7 days)" = current_7_ensemble
+  # "CRPS Ensemble" = crps_mixture
 )
 
 # Set up parallelisation --------------------------------------------------
@@ -140,6 +150,7 @@ future::plan("multiprocess")
 forecast_eval <- EpiSoon::compare_timeseries(obs_rts = rt_timeseries,
                                              obs_cases = case_timeseries,
                                              models = models,
+                                             # models = list("CRPS" = crps_mixture),
                                              horizon = 21,
                                              samples = 10,
                                              serial_interval = covid_serial_interval)
@@ -149,10 +160,10 @@ forecast_eval <- EpiSoon::compare_timeseries(obs_rts = rt_timeseries,
 
 ## Forecasts
 forecast_rts <- forecast_eval$forecast_rts  
-saveRDS(forecast_rts, here::here("forecast/model-choice/data/forecast_rts.rds")) 
+saveRDS(forecast_rts, here::here("data/forecast_rts.rds")) 
 
 forecast_cases <- forecast_eval$forecast_cases  
-saveRDS(forecast_cases, here::here("forecast/model-choice/data/forecast_cases.rds")) 
+saveRDS(forecast_cases, here::here("data/forecast_cases.rds")) 
 
 ## Scores
 rt_scores <- forecast_eval$rt_scores
@@ -253,7 +264,7 @@ sum_scores <- summarise_scores_recent_all(rt_scores, recent = 7) %>%
                   factor(levels = c("Rt", "Cases")))
 
 
-saveRDS(sum_scores, here::here("forecast/model-choice/data/summarised_scores.rds"))
+saveRDS(sum_scores, here::here("data/summarised_scores.rds"))
 
 
 
@@ -284,39 +295,39 @@ summary_plot <- function(scores, target_score) {
 
 bias_summary_plot <- summary_plot(sum_scores, "Bias")
 
-ggsave(paste0("forecast/model-choice/figures/bias.png"), bias_summary_plot, 
+ggsave(paste0("figures/bias.png"), bias_summary_plot, 
        dpi = 330, width = 8, height = 6)
 
 
 crps_summary_plot <- summary_plot(sum_scores, "CRPS")
 
-ggsave(paste0("forecast/model-choice/figures/crps.png"), crps_summary_plot, 
+ggsave(paste0("figures/crps.png"), crps_summary_plot, 
        dpi = 330, width = 8, height = 6)
 
 sharpness_summary_plot <- summary_plot(sum_scores, "Sharpness") 
 
-ggsave(paste0("forecast/model-choice/figures/sharpness.png"), sharpness_summary_plot, 
+ggsave(paste0("figures/sharpness.png"), sharpness_summary_plot, 
        dpi = 330, width = 8, height = 6)
 
 calibration_summary_plot <- summary_plot(sum_scores, "Calibration") 
 
-ggsave(paste0("forecast/model-choice/figures/calibration.png"), calibration_summary_plot, 
+ggsave(paste0("figures/calibration.png"), calibration_summary_plot, 
        dpi = 330, width = 8, height = 6)
 
 
 median_summary_plot <- summary_plot(sum_scores, "Median") 
 
-ggsave(paste0("forecast/model-choice/figures/median.png"), median_summary_plot, 
+ggsave(paste0("figures/median.png"), median_summary_plot, 
        dpi = 330, width = 8, height = 6)
 
 iqr_summary_plot <- summary_plot(sum_scores, "IQR") 
 
-ggsave(paste0("forecast/model-choice/figures/iqr.png"), iqr_summary_plot, 
+ggsave(paste0("figures/iqr.png"), iqr_summary_plot, 
        dpi = 330, width = 8, height = 6)
 
 ci_summary_plot <- summary_plot(sum_scores, "CI") 
 
-ggsave(paste0("forecast/model-choice/figures/ci.png"), ci_summary_plot, 
+ggsave(paste0("figures/ci.png"), ci_summary_plot, 
        dpi = 330, width = 8, height = 6)
 
 # Plot evaluation ---------------------------------------------------------
@@ -330,7 +341,7 @@ plot_case_rt_comparison <- function(horizon = NULL) {
     cowplot::panel_border()
   
   
-  ggsave(paste0("forecast/model-choice/figures/rt_plot_", horizon, ".png"), rt_plot, 
+  ggsave(paste0("figures/rt_plot_", horizon, ".png"), rt_plot, 
          dpi = 330, width = 36, height = 24)
   
   
@@ -340,7 +351,7 @@ plot_case_rt_comparison <- function(horizon = NULL) {
     ggplot2::facet_grid(model ~ timeseries, scales = "free_y") +
     cowplot::panel_border()
   
-  ggsave(paste0("forecast/model-choice/figures/case_plot_", horizon, ".png"), case_plot, 
+  ggsave(paste0("figures/case_plot_", horizon, ".png"), case_plot, 
          dpi = 330, width = 36, height = 24)
   
   return(invisible(NULL))
@@ -408,7 +419,7 @@ plot_horizon_score <- patchwork::wrap_plots(plot_rt_horizon_score,
                                             plot_cases_horizon_score) + 
   patchwork::plot_layout(ncol = 1)
 
-ggsave("forecast/model-choice/figures/horizon_score.png", plot_horizon_score, 
+ggsave("figures/horizon_score.png", plot_horizon_score, 
        dpi = 330, width = 18, height = 18)
 
 ## Summarise scores across regions
@@ -461,9 +472,9 @@ plot_regions_7_up <- scores_8_plus %>%
   ggplot2::labs(x = "", y = "")
 
 
-ggsave("forecast/model-choice/figures/region_score_7.png", plot_regions_7, 
+ggsave("figures/region_score_7.png", plot_regions_7, 
        dpi = 330, width = 18, height = 12)
 
 
-ggsave("forecast/model-choice/figures/region_score_8_plus.png", plot_regions_7_up, 
+ggsave("figures/region_score_8_plus.png", plot_regions_7_up, 
        dpi = 330, width = 18, height = 12)
