@@ -1,6 +1,6 @@
 ---
 title: "Forecast Evaluation"
-output: html_document
+output: github_document
 ---
 
 ```{r setup, include=FALSE}
@@ -16,18 +16,20 @@ The framework relies on the two packages EpiNow and EpiSoon. EpiNow provides too
 ## Fitting
 
 EpiNow:
-  - input: reported cases
-  - fit a delay distribution between symptom onset and reporting using exp or gamma distribution, evaluated using LOOIC. 
-  - use delay distribution to transform reported cases to cases on the day of symptom onset
-  - number of cases on the day of symptom onset is upscaled to account for the fact that some might have symptoms but haven't yet been reported. Upscaling is done using a negative binomial distribution. 
-  - use EpiEstim to estimate time-varying reproduction number on sympom onset cases. To account for uncertainty, the used mean and sd of the serial interval are sampled 1000 times, so that the Reproduction Number is estimated 1000 times. 
-  - This is repeated for different sliding moving average windows in the range of 1 to 7 days. 
-  - For every of the 1000 combinations of mean and sd of the serial interval, the optimal time window is chosen to yield the best one day ahead predicitions, implicitly resulting in a mixture of time windows. 
+
+* input: reported cases
+* fit a delay distribution between symptom onset and reporting using exp or gamma distribution, evaluated using LOOIC. 
+* use delay distribution to transform reported cases to cases on the day of symptom onset
+* number of cases on the day of symptom onset is upscaled to account for the fact that some might have symptoms but haven't yet been reported. Upscaling is done using a negative binomial distribution. 
+* use EpiEstim to estimate time-varying reproduction number on sympom onset cases. To account for uncertainty, the used mean and sd of the serial interval are sampled 1000 times, so that the Reproduction Number is estimated 1000 times. 
+* This is repeated for different sliding moving average windows in the range of 1 to 7 days. 
+- For every of the 1000 combinations of mean and sd of the serial interval, the optimal time window is chosen to yield the best one day ahead predicitions, implicitly resulting in a mixture of time windows. 
   
 EpiSoon:
-  - forecast $R_t$-values using time series models provided by bsts, fable, and soon brms
-  - convert $R_t$-forecasts back to case forecasts using a renewal equation
-  - currently, every region is forecasted completely separately
+
+- forecast $R_t$-values using time series models provided by bsts, fable, and soon brms
+- convert $R_t$-forecasts back to case forecasts using a renewal equation
+- currently, every region is forecasted completely separately
   
 # Forecasting
 
@@ -36,10 +38,11 @@ Forecasts and estimates can be obtained in two ways: cloning them from the exist
 ### Existing Repos
 The results displayed on epiforecasts.io/covid/ are saved in two repos on github.com/epiforecasts. To access the global data, clone the epiforecasts/covid-global repository. For access to regional breakdowns in Germany, Italy, The UK or the US, clone the epiforecasts/covid-regional repository (both repos are fairly large). 
 
-´´´
+
 git clone https://github.com/epiforecasts/covid-global
+
 git clone https://github.com/epiforecasts/covid-regional
-´´´
+
 
 ### Creating New Forecasts
 To create new forecasts with settings different from the ones we currently use, one can ran the update_nowcasts.R script. In the covid-global repo it lies in the top directory, covid-global/update_nowcasts.R. In the regional repo, there is one script per region in the regional folders, e.g. in covid-regional/united-states/update_nowcasts.R. 
