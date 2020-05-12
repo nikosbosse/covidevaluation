@@ -46,7 +46,7 @@
 #'                                                            fable::RW(y ~ drift()), cmbn_args = list(weights = "inv_var")), ...)
 #' }
 #' models <- list(
-#'   # Mixfabl = baseline_ensemble,
+#'   Mixfabl = baseline_ensemble,
 #'   "ARIMA" = function(...){EpiSoon::fable_model(model = fable::ARIMA(y), ...)},
 #'   "ETS" = function(...){EpiSoon::fable_model(model = fable::ETS(y), ...)},
 #'   "Drift" = function(...){EpiSoon::fable_model(model = fable::RW(y ~ drift()), ...)}
@@ -88,11 +88,16 @@
 
 crps_ensemble <- function(y = NULL,
                           models = NULL,
-                          weighting_period = 5,
-                          ...) {
-  
-  
+                          samples = NULL,
+                          horizon = NULL,
+                          weighting_period = 5) {
+
+
   #### Error Handling
+  # check if y is there
+  if(is.null(y)) stop("parameter y is missing")
+
+
   # check if stackr is installed
   if (!suppressWarnings(require("stackr", quietly = TRUE) == TRUE)) {
     stop("package stackr must be installed. You can install it using devtools::install_github('nikosbosse/stackr')")
@@ -100,14 +105,14 @@ crps_ensemble <- function(y = NULL,
   if (length(y) <= weighting_period) {
     stop("not enough observations to do weighting. Adjust weighting_period")
   }
-  
+
   #### split data into train data and data for weighting. Use train data to
   # generate forecasts, score them against weight data, then generate forecasts
   # bases on the entire time series and use the obtained weights to create mixture
   n <- length(y)
   y_train <- y[1:(n - weighting_period)]
   y_weight <- y[(n - weighting_period + 1):n]
-  
+
   #### fit models on train data and generate forecasts
   fc_w <- purrr::map_dfr(seq_along(models),
                          .f = function(i) {
@@ -115,7 +120,7 @@ crps_ensemble <- function(y = NULL,
                            out <- model_function(y = y_train,
                                                  samples = samples,
                                                  horizon = weighting_period)
-                           
+
                            # bring data in the correct format the stackr package expects
                            dplyr::as_tibble(out) %>%
                              dplyr::mutate(sample_nr = 1:dplyr::n()) %>%
@@ -127,12 +132,12 @@ crps_ensemble <- function(y = NULL,
                              dplyr::ungroup() %>%
                              dplyr::mutate(model = names(models)[i],
                                            geography = "Testland")
-                           
-                         })
-  
+
+         })
+
   # obtain weights based on the training forecasts generated
   w <- stackr::stack_crps(fc_w)
-  
+
   #### generate real forecasts and use weights to stack
   fc <- purrr::map_dfr(seq_along(models),
                        .f = function(i) {
@@ -140,7 +145,7 @@ crps_ensemble <- function(y = NULL,
                          out <- model_function(y = y,
                                                samples = samples,
                                                horizon = horizon)
-                         
+
                          # bring data in correct format so the stackr can generate
                          # the mixture
                          as_tibble(out) %>%
@@ -152,19 +157,17 @@ crps_ensemble <- function(y = NULL,
                            dplyr::ungroup() %>%
                            dplyr::mutate(model = names(models)[i],
                                          geography = "Testland")
-                         
+
                        })
-  
+
   # generate mixture
   mix <- stackr::mixture_from_sample(fc, weights = w)
-  
+
   # make output compatible with what the other EpiSoon functions return
   mixed_samples <- mix %>%
     dplyr::select(-model, -geography) %>%
     pivot_wider(values_from = y_pred, names_from = date) %>%
     dplyr::select(-sample_nr)
-  
+
   return(mixed_samples)
 }
-
-
