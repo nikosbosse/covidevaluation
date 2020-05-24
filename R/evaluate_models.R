@@ -15,18 +15,21 @@ require(dplyr)
 require(ggplot2)
 require(patchwork)
 require(cowplot)
-require(EpiSoon)
+require(stackr)
 
 # Get timeseries ----------------------------------------------------------
 
 data_samples <- 100
 
-dir <- "covid-global/national" # gl
+dir <- "covid-global/national" # global
 dir <- "../covid-regional/united-states/regional" # regional in US
+
 
 ## Extract the Rt and case timeseries as produced by EpiNow
 timeseries <- EpiNow::get_timeseries(dir)
 
+## select worst hit states
+states <- c("California", "Illinois", "Maryland", "New Jersey, New York", "Texas")
 
 ## Extract rt timeseries and format
 rt_timeseries <- timeseries$rt %>% 
