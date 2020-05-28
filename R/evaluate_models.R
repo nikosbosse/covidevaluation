@@ -19,7 +19,7 @@ require(stackr)
 
 # Get timeseries ----------------------------------------------------------
 
-data_samples <- 100
+data_samples <- 10
 
 dir <- "covid-global/national" # global
 dir <- "../covid-regional/united-states/regional" # regional in US
@@ -36,7 +36,7 @@ rt_timeseries <- timeseries$rt %>%
   dplyr::filter(rt_type %in% "nowcast", 
                 type %in% "nowcast") %>% 
   # only look at New York for now
-  dplyr::filter(region %in% "New York") %>%
+  dplyr::filter(region %in% states) %>%
   dplyr::mutate(sample = as.numeric(sample)) %>% 
   dplyr::group_by(region, date, sample) %>% 
   dplyr::mutate(rt_sample = 1:dplyr::n()) %>% 
@@ -52,7 +52,7 @@ rt_timeseries <- timeseries$rt %>%
 case_timeseries <- timeseries$incidence %>% 
   dplyr::filter(import_status %in% "local") %>% 
   # only look at New York for now
-  dplyr::filter(region %in% "New York") %>%
+  dplyr::filter(region %in% states) %>%
   dplyr::mutate(sample = as.numeric(sample)) %>% 
   dplyr::select(timeseries = region, cases, date, sample)
 
@@ -66,6 +66,14 @@ rt_timeseries <- rt_timeseries %>%
 case_timeseries <- case_timeseries %>% 
   dplyr::filter(sample %in% samples)
 
+
+## filter out all duplicate occurences for the same date and the same sample
+## this should be fixed upstream eventually
+case_timeseries <- case_timeseries %>%
+  dplyr::group_by(date, sample, timeseries) %>%
+  dplyr::slice(1) %>%
+  dplyr::ungroup()
+
 ## Save samples
 saveRDS(rt_timeseries, "data/rt_timeseries.rds")
 
@@ -76,6 +84,7 @@ saveRDS(case_timeseries, "data/case_timeseries.rds")
 ## In EpiNow we use a sampled serial interval - this is not yet supported 
 ## by EpiSoon and so instead here we define the mean serial interval
 covid_serial_interval <- rowMeans(EpiNow::covid_serial_intervals)
+covid_serial_interval <- rowMeans(EpiNow::covid_generation_times)
 
 # Define models for evaluation --------------------------------------------
 
@@ -115,27 +124,23 @@ no_arima_ensemble <- function(...) {
                                                              cmbn_args = list(weights = "inv_var")), ...)
 }
 
-## CRPS ensemble
-# needs debugging
-# crps_mixture <- function(...){
-#   crps_ensemble(models = list("ARIMA" = function(...){EpiSoon::fable_model(model = fable::ARIMA(y), ...)},
-#                               "ETS" = function(...){EpiSoon::fable_model(model = fable::ETS(y), ...)},
-#                               "NAIVE" = function(...){EpiSoon::fable_model(model = fable::NAIVE(y), ...)},
-#                               "Drift" = function(...){EpiSoon::fable_model(model = fable::RW(y ~ drift()), ...)}
-#                               ),
-#                 weighting_period = 5,
-#                 ...)}
-
-
-
+crps_models <- list("Naive" = function(...){EpiSoon::fable_model(model = fable::NAIVE(y), ...)},
+                    "ARIMA" = function(...){EpiSoon::fable_model(model = fable::ARIMA(y), ...)},
+                    "ETS" = function(...){EpiSoon::fable_model(model = fable::ETS(y), ...)},
+                    "Drift" = function(...){EpiSoon::fable_model(model = fable::RW(y ~ drift()), ...)})
 
 models <- list( 
+  "CRPS Ensemble" = function(...){EpiSoon::stackr_model(models = list("Naive" = function(...){EpiSoon::fable_model(model = fable::NAIVE(y), ...)},
+                                                                      "ARIMA" = function(...){EpiSoon::fable_model(model = fable::ARIMA(y), ...)},
+                                                                      "ETS" = function(...){EpiSoon::fable_model(model = fable::ETS(y), ...)},
+                                                                      "Drift" = function(...){EpiSoon::fable_model(model = fable::RW(y ~ drift()), ...)}),
+                                               weighting_period = 5,
+                                               ...)},
   "Naive" = function(...){EpiSoon::fable_model(model = fable::NAIVE(y), ...)},
   "ARIMA" = function(...){EpiSoon::fable_model(model = fable::ARIMA(y), ...)},
   "ETS" = function(...){EpiSoon::fable_model(model = fable::ETS(y), ...)},
   "Drift" = function(...){EpiSoon::fable_model(model = fable::RW(y ~ drift()), ...)},
-  "Ensemble (weighted)" =  baseline_ensemble,
-  # "CRPS Ensemble" = crps_mixture
+  "Ensemble (weighted)" =  baseline_ensemble
 )
 
 # Set up parallelisation --------------------------------------------------
@@ -155,8 +160,11 @@ forecast_eval <- EpiSoon::compare_timeseries(obs_rts = rt_timeseries,
                                              models = models,
                                              # models = list("CRPS" = crps_mixture),
                                              horizon = 21,
-                                             samples = 10,
-                                             serial_interval = covid_serial_interval)
+                                             samples = 500,
+                                             serial_interval = covid_serial_interval, 
+                                             min_points = 10, 
+                                             return_raw = TRUE)
+
 
 
 # Load in evaluation ------------------------------------------------------
@@ -170,6 +178,7 @@ saveRDS(forecast_cases, here::here("data/forecast_cases.rds"))
 
 ## Scores
 rt_scores <- forecast_eval$rt_scores
+
 case_scores  <- forecast_eval$case_scores 
 
 ## Summarised scores
@@ -481,3 +490,4 @@ ggsave("figures/region_score_7.png", plot_regions_7,
 
 ggsave("figures/region_score_8_plus.png", plot_regions_7_up, 
        dpi = 330, width = 18, height = 12)
+
