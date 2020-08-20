@@ -19,10 +19,11 @@ require(stackr)
 
 # Get timeseries ----------------------------------------------------------
 
-data_samples <- 10
+data_samples <- 1
 
 dir <- "covid-global/national" # global
 dir <- "../covid-regional/united-states/regional" # regional in US
+dir <- "../covid-uk/nowcast/national" # global
 
 
 ## Extract the Rt and case timeseries as produced by EpiNow
@@ -30,6 +31,7 @@ timeseries <- EpiNow::get_timeseries(dir)
 
 ## select worst hit states
 states <- c("California", "Illinois", "Maryland", "New Jersey, New York", "Texas")
+states <- "England"
 
 ## Extract rt timeseries and format
 rt_timeseries <- timeseries$rt %>% 
@@ -124,23 +126,41 @@ no_arima_ensemble <- function(...) {
                                                              cmbn_args = list(weights = "inv_var")), ...)
 }
 
-crps_models <- list("Naive" = function(...){EpiSoon::fable_model(model = fable::NAIVE(y), ...)},
-                    "ARIMA" = function(...){EpiSoon::fable_model(model = fable::ARIMA(y), ...)},
-                    "ETS" = function(...){EpiSoon::fable_model(model = fable::ETS(y), ...)},
-                    "Drift" = function(...){EpiSoon::fable_model(model = fable::RW(y ~ drift()), ...)})
+
+
+forecast_hybrid_ensemble <- function(...) {
+  EpiSoon::forecastHybrid_model(
+    model_params = list(models = "aefz", weights = "equal"), 
+    forecast_params = list(PI.combination = "mean"), 
+    ...)
+}
+
+
 
 models <- list( 
-  "CRPS Ensemble" = function(...){EpiSoon::stackr_model(models = list("Naive" = function(...){EpiSoon::fable_model(model = fable::NAIVE(y), ...)},
+  "forecast_ARIMA" = function(...) {EpiSoon::forecast_model(model = forecast::auto.arima, ...)},
+  "forecast_ETS" = function(...) {EpiSoon::forecast_model(model = forecast::ets, ...)},
+  "forecast_thetam" = function(...) {EpiSoon::forecast_model(model = forecast::thetaf, h = 21, ...)},
+  "forecast_snaive" = function(...) {EpiSoon::forecast_model(model = forecast::snaive, h = 21, ...)},
+  "forecast_CRPS_Ensemble" = function(...){EpiSoon::stackr_model(models = list("forecast_ARIMA" = function(...) {EpiSoon::forecast_model(model = forecast::auto.arima, ...)},
+                                                                            "forecast_ETS" = function(...) {EpiSoon::forecast_model(model = forecast::ets, ...)},
+                                                                            "forecast_thetam" = function(...) {EpiSoon::forecast_model(model = forecast::thetaf, h = 21, ...)},
+                                                                            "forecast_snaive" = function(...) {EpiSoon::forecast_model(model = forecast::snaive, h = 21, ...)}),
+                                                              weighting_period = 5,
+                                                              ...)},
+  
+  
+  "fable_CRPS_Ensemble" = function(...){EpiSoon::stackr_model(models = list("Naive" = function(...){EpiSoon::fable_model(model = fable::NAIVE(y), ...)},
                                                                       "ARIMA" = function(...){EpiSoon::fable_model(model = fable::ARIMA(y), ...)},
                                                                       "ETS" = function(...){EpiSoon::fable_model(model = fable::ETS(y), ...)},
                                                                       "Drift" = function(...){EpiSoon::fable_model(model = fable::RW(y ~ drift()), ...)}),
                                                weighting_period = 5,
                                                ...)},
-  "Naive" = function(...){EpiSoon::fable_model(model = fable::NAIVE(y), ...)},
-  "ARIMA" = function(...){EpiSoon::fable_model(model = fable::ARIMA(y), ...)},
-  "ETS" = function(...){EpiSoon::fable_model(model = fable::ETS(y), ...)},
-  "Drift" = function(...){EpiSoon::fable_model(model = fable::RW(y ~ drift()), ...)},
-  "Ensemble (weighted)" =  baseline_ensemble
+  "fable_Naive" = function(...){EpiSoon::fable_model(model = fable::NAIVE(y), ...)},
+  "fable_ARIMA" = function(...){EpiSoon::fable_model(model = fable::ARIMA(y), ...)},
+  "fable_ETS" = function(...){EpiSoon::fable_model(model = fable::ETS(y), ...)},
+  "fable_Drift" = function(...){EpiSoon::fable_model(model = fable::RW(y ~ drift()), ...)},
+  "fable_Ensemble_(weighted)" =  baseline_ensemble
 )
 
 # Set up parallelisation --------------------------------------------------
@@ -157,15 +177,30 @@ future::plan("multiprocess")
 ## Run iterative evaluation
 forecast_eval <- EpiSoon::compare_timeseries(obs_rts = rt_timeseries,
                                              obs_cases = case_timeseries,
-                                             models = models,
-                                             # models = list("CRPS" = crps_mixture),
-                                             horizon = 21,
-                                             samples = 500,
+                                             models = models[1],
+                                             horizon = 2,
+                                             samples = 5,
                                              serial_interval = covid_serial_interval, 
                                              min_points = 10, 
                                              return_raw = TRUE)
 
+forecast_eval$raw_rt_forecast$model %>% unique()
 
+
+forecast_eval$raw_rt_forecast %>%
+  dplyr::filter(model == "forecast_ARIMA") %>%
+  group_by(c(forecast_date, obs_sample)) %>%
+  dplyr::select(-c(timeseries, model, forecast_date, obs_sample)) %>%
+  score_forecast(rt_timeseries)
+
+fc <- forecast_eval$raw_rt_forecast %>%
+  dplyr::left_join(rt_timeseries %>%
+                     dplyr::rename(true_values = rt, 
+                                   obs_sample = sample))
+
+?scoringutils::eval_forecasts()
+
+debugonce(score_forecast)
 
 # Load in evaluation ------------------------------------------------------
 
@@ -300,7 +335,8 @@ summary_plot <- function(scores, target_score) {
     ggplot2::coord_flip() +
     facet_grid(horizon ~ type, scales = "free_x") +
     cowplot::panel_border()  +
-    labs(x = "Model", y = target_score, col = "Data")
+    labs(x = "Model", y = target_score, col = "Data") + 
+    theme(text = element_text(family = "Sans Serif"))
   
   
 }
@@ -361,7 +397,8 @@ plot_case_rt_comparison <- function(horizon = NULL) {
   case_plot <- EpiSoon::plot_forecast_evaluation(forecast_cases, case_timeseries,
                                                  horizon_to_plot = horizon) +
     ggplot2::facet_grid(model ~ timeseries, scales = "free_y") +
-    cowplot::panel_border()
+    cowplot::panel_border() + 
+    theme(text = element_text(family = "Sans Serif"))
   
   ggsave(paste0("figures/case_plot_", horizon, ".png"), case_plot, 
          dpi = 330, width = 36, height = 24)
